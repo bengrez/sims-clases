@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Animal Groups Lab — Flocking + Sync</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#0f1730; --muted:#8da2c0; --text:#e7eefc; --accent:#86b7ff;
+      --good:#7CFFB2; --warn:#ffd48a; --bad:#ff7c8a; --line:rgba(255,255,255,.10);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    #app{display:grid; grid-template-columns: 360px 1fr; height:100%}
+    #panel{
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border-right:1px solid var(--line);
+      padding:14px 14px 10px;
+      overflow:auto;
+    }
+    #canvasWrap{position:relative; overflow:hidden}
+    canvas{display:block; width:100%; height:100%;}
+    h1{font-size:16px; margin:0 0 10px; letter-spacing:.2px}
+    .sub{color:var(--muted); font-size:12px; line-height:1.35; margin:0 0 12px}
+    .row{display:flex; gap:8px; align-items:center; margin:8px 0}
+    .row > label{flex: 1; font-size:12px; color:var(--muted)}
+    select, button, input[type="range"], input[type="checkbox"]{
+      font:inherit;
+    }
+    select, button{
+      background:rgba(255,255,255,.06);
+      border:1px solid var(--line);
+      color:var(--text);
+      border-radius:10px;
+      padding:8px 10px;
+      cursor:pointer;
+    }
+    button:hover{border-color:rgba(255,255,255,.25)}
+    button.primary{background:rgba(134,183,255,.18); border-color:rgba(134,183,255,.35)}
+    button.danger{background:rgba(255,124,138,.14); border-color:rgba(255,124,138,.35)}
+    .group{border:1px solid var(--line); border-radius:14px; padding:10px; margin:10px 0; background:rgba(0,0,0,.10)}
+    .gtitle{font-size:12px; color:var(--text); opacity:.95; margin:0 0 6px}
+    .hint{font-size:11px; color:var(--muted); margin:6px 0 0; line-height:1.35}
+    .kv{display:grid; grid-template-columns: 1fr auto; gap:6px; font-size:12px; color:var(--muted)}
+    .kv strong{color:var(--text); font-weight:600}
+    .slider{width:170px}
+    .pill{
+      display:inline-flex; gap:8px; align-items:center;
+      padding:6px 10px; border:1px solid var(--line);
+      border-radius:999px; background:rgba(255,255,255,.05);
+      font-size:11px; color:var(--muted)
+    }
+    #hud{
+      position:absolute; left:12px; top:12px;
+      background:rgba(0,0,0,.35); border:1px solid var(--line);
+      border-radius:12px; padding:8px 10px;
+      backdrop-filter: blur(6px);
+      font-size:12px; color:var(--muted);
+      max-width:min(560px, calc(100% - 24px));
+    }
+    #hud b{color:var(--text)}
+    .sep{height:1px; background:var(--line); margin:10px 0}
+    .mini{font-size:11px; color:var(--muted)}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      padding:1px 6px; border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.05); color:var(--text)}
+    .question{font-size:11px; color:var(--muted); margin:6px 0; line-height:1.3}
+    .hidden{display:none !important}
+
+    @media (max-width: 900px){
+      #app{grid-template-columns: 1fr; grid-template-rows: auto 1fr}
+      #panel{border-right:none; border-bottom:1px solid var(--line)}
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <h1 id="titleHeading">Animal Groups Lab</h1>
+    <p class="sub" id="subtitleText">
+      Simulador standalone para modelar comportamiento de grupos: <b>flocking (boids)</b> y <b>sincronización</b>
+      (estilo Strogatz/Kuramoto: individuos que “se sincronizan” con sus vecinos).
+    </p>
+
+    <div class="row">
+      <label for="language" id="labelLanguage">Idioma</label>
+      <select id="language">
+        <option value="es">Español</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="preset" id="labelPreset">Nivel</label>
+      <select id="preset">
+        <option value="primary">Primaria</option>
+        <option value="highschool" selected>Secundaria</option>
+        <option value="postgrad">Postgrado</option>
+        <option value="custom">Personalizado</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="mode" id="labelMode">Modo</label>
+      <select id="mode">
+        <option value="flock" id="optModeFlock">Flocking (aves / peces / herbívoros)</option>
+        <option value="sync" id="optModeSync">Sincronización (luciérnagas / ranas / grillos)</option>
+        <option value="mixed" id="optModeMixed">Mixto (flocking + tendencia a sincronizar)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <button class="primary" id="btnPlay">Pausar</button>
+      <button id="btnStep" title="Avanza un frame (si está pausado)">Step</button>
+      <button class="danger" id="btnReset">Reset</button>
+    </div>
+
+    <div class="group" id="groupPopulation">
+      <div class="gtitle" id="titlePopulation">Población</div>
+      <div class="row">
+        <label for="nAgents" id="labelAgents">N individuos</label>
+        <input class="slider" id="nAgents" type="range" min="20" max="500" value="160" />
+        <span class="pill" id="nAgentsVal">160</span>
+      </div>
+      <div class="row">
+        <label for="seed" id="labelSeed">Semilla</label>
+        <select id="seed">
+          <option value="random" id="optSeedRandom">Aleatoria</option>
+          <option value="fixed" id="optSeedFixed">Fija</option>
+        </select>
+      </div>
+      <p class="hint" id="hintShortcuts">Atajos: <span class="kbd">Espacio</span> play/pause · <span class="kbd">R</span> reset · <span class="kbd">P</span> predator.</p>
+    </div>
+
+    <div class="group" id="groupFlocking">
+      <div class="gtitle" id="titleFlocking">Flocking (Boids)</div>
+
+      <div class="row">
+        <label for="vision" id="labelVision">Radio de visión</label>
+        <input class="slider" id="vision" type="range" min="10" max="140" value="70" />
+        <span class="pill" id="visionVal">70</span>
+      </div>
+
+      <div class="row">
+        <label for="separation" id="labelSeparation">Separación</label>
+        <input class="slider" id="separation" type="range" min="0" max="3" step="0.01" value="1.20" />
+        <span class="pill" id="separationVal">1.20</span>
+      </div>
+
+      <div class="row">
+        <label for="alignment" id="labelAlignment">Alineamiento</label>
+        <input class="slider" id="alignment" type="range" min="0" max="3" step="0.01" value="0.95" />
+        <span class="pill" id="alignmentVal">0.95</span>
+      </div>
+
+      <div class="row">
+        <label for="cohesion" id="labelCohesion">Cohesión</label>
+        <input class="slider" id="cohesion" type="range" min="0" max="3" step="0.01" value="0.80" />
+        <span class="pill" id="cohesionVal">0.80</span>
+      </div>
+
+      <div class="row advanced">
+        <label for="maxSpeed" id="labelMaxSpeed">Velocidad máx.</label>
+        <input class="slider" id="maxSpeed" type="range" min="0.5" max="6" step="0.1" value="3.2" />
+        <span class="pill" id="maxSpeedVal">3.2</span>
+      </div>
+
+      <div class="row advanced">
+        <label for="maxForce" id="labelMaxForce">Fuerza máx.</label>
+        <input class="slider" id="maxForce" type="range" min="0.01" max="0.3" step="0.01" value="0.10" />
+        <span class="pill" id="maxForceVal">0.10</span>
+      </div>
+
+      <div class="row">
+        <label for="activeRule" id="labelActiveRule">Regla activa</label>
+        <select id="activeRule">
+          <option value="all" id="optRuleAll">Todas las reglas</option>
+          <option value="separation" id="optRuleSep">Solo separación</option>
+          <option value="alignment" id="optRuleAli">Solo alineamiento</option>
+          <option value="cohesion" id="optRuleCoh">Solo cohesión</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="showDebug" id="labelShowDebug">Visualizar reglas</label>
+        <input id="showDebug" type="checkbox" />
+        <span class="pill" id="labelDebugState">ON/OFF</span>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row">
+        <label for="wrap" id="labelBorders">Bordes</label>
+        <select id="wrap">
+          <option value="wrap" id="optWrap">Wrap (toroide)</option>
+          <option value="bounce" id="optBounce">Rebote</option>
+        </select>
+      </div>
+
+      <div class="row advanced">
+        <label for="predator" id="labelPredator">Predator</label>
+        <input id="predator" type="checkbox" />
+        <span class="pill" id="labelPredatorState">ON/OFF</span>
+      </div>
+
+      <div class="row advanced">
+        <label for="predFear" id="labelPredFear">Miedo a predator</label>
+        <input class="slider" id="predFear" type="range" min="0" max="6" step="0.05" value="2.4" />
+        <span class="pill" id="predFearVal">2.40</span>
+      </div>
+
+      <p class="hint" id="hintFlocking">Idea didáctica: sube <b>separación</b> para “evitar choques”, sube <b>cohesión</b> para “herd/school”, y activa <b>predator</b> para ver “safety in numbers”.</p>
+    </div>
+
+    <div class="group" id="groupSync">
+      <div class="gtitle" id="titleSync">Sincronización (Kuramoto)</div>
+
+      <div class="row">
+        <label for="K" id="labelK">Acoplamiento (K)</label>
+        <input class="slider" id="K" type="range" min="0" max="6" step="0.05" value="2.2" />
+        <span class="pill" id="KVal">2.20</span>
+      </div>
+
+      <div class="row">
+        <label for="noise" id="labelNoise">Ruido</label>
+        <input class="slider" id="noise" type="range" min="0" max="2" step="0.01" value="0.15" />
+        <span class="pill" id="noiseVal">0.15</span>
+      </div>
+
+      <div class="row">
+        <label for="syncLocal" id="labelSyncLocal">Alcance vecinos</label>
+        <input class="slider" id="syncLocal" type="range" min="1" max="40" step="1" value="10" />
+        <span class="pill" id="syncLocalVal">10</span>
+      </div>
+
+      <p class="hint" id="hintSync">K bajo: cada uno “a su ritmo”. K alto: tienden a sincronizar (destellos simultáneos).</p>
+    </div>
+
+    <div class="group" id="groupMetrics">
+      <div class="gtitle" id="titleMetrics">Métricas</div>
+      <div class="kv">
+        <div id="labelOrder">Orden de flock (alineamiento global)</div><div><strong id="mOrder">—</strong></div>
+        <div id="labelSyncMetric">Sincronía (|promedio de fases|)</div><div><strong id="mSync">—</strong></div>
+        <div id="labelFps">FPS</div><div><strong id="mFps">—</strong></div>
+      </div>
+      <button id="btnExport" class="primary" style="margin-top:8px">Exportar CSV</button>
+      <p class="hint" id="hintMetrics">Orden ≈ 0: caos. Orden ≈ 1: velocidades alineadas. Sincronía ≈ 1: fases alineadas.</p>
+    </div>
+
+    <div class="group" id="groupQuestions">
+      <div class="gtitle" id="titleQuestions">🔬 Preguntas guía</div>
+      <div class="question" data-level="primary" id="questionPrimary">¿Qué pasa cuando subes la cohesión al máximo?</div>
+      <div class="question" data-level="highschool" id="questionHigh">¿Por qué el “orden” aumenta cuando hay un depredador?</div>
+      <div class="question" data-level="postgrad" id="questionPost">¿A qué valor de K ocurre la transición de fase?</div>
+    </div>
+
+    <p class="mini" id="hintMouse">Tip: si quieres “migración”, mueve el mouse: el grupo tenderá a seguir un objetivo (modo flock/mixed).</p>
+  </aside>
+
+  <main id="canvasWrap">
+    <div id="hud">
+      <span id="hudText"><b>Mouse</b>: objetivo / “recurso” · <b>Click</b>: mover predator (si está ON) ·
+      <b>Modo sync</b>: destellos cuando la fase cruza 2π.</span>
+    </div>
+    <canvas id="c"></canvas>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------- Utilities ----------
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // Seedable RNG (Mulberry32)
+  function mulberry32(seed) {
+    let t = seed >>> 0;
+    return function() {
+      t += 0x6D2B79F5;
+      let x = Math.imul(t ^ (t >>> 15), 1 | t);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Vec2
+  class V {
+    constructor(x=0,y=0){this.x=x;this.y=y;}
+    add(o){this.x+=o.x; this.y+=o.y; return this;}
+    sub(o){this.x-=o.x; this.y-=o.y; return this;}
+    mul(k){this.x*=k; this.y*=k; return this;}
+    div(k){this.x/=k; this.y/=k; return this;}
+    mag(){return Math.hypot(this.x,this.y);}
+    mag2(){return this.x*this.x+this.y*this.y;}
+    norm(){const m=this.mag(); if(m>1e-9)this.div(m); return this;}
+    setMag(m){this.norm().mul(m); return this;}
+    limit(m){const mm=this.mag(); if(mm>m)this.setMag(m); return this;}
+    copy(){return new V(this.x,this.y);}
+    static sub(a,b){return new V(a.x-b.x,a.y-b.y);}
+  }
+
+  const LANG = {
+    es: {
+      titleHeading: "Animal Groups Lab",
+      subtitleText: "Simulador standalone para modelar comportamiento de grupos: <b>flocking (boids)</b> y <b>sincronización</b> (estilo Strogatz/Kuramoto: individuos que “se sincronizan” con sus vecinos).",
+      labelLanguage: "Idioma",
+      labelPreset: "Nivel",
+      labelMode: "Modo",
+      optModeFlock: "Flocking (aves / peces / herbívoros)",
+      optModeSync: "Sincronización (luciérnagas / ranas / grillos)",
+      optModeMixed: "Mixto (flocking + tendencia a sincronizar)",
+      btnPlayRunning: "Pausar",
+      btnPlayPaused: "Play",
+      titlePopulation: "Población",
+      labelAgents: "N individuos",
+      labelSeed: "Semilla",
+      optSeedRandom: "Aleatoria",
+      optSeedFixed: "Fija",
+      hintShortcuts: "Atajos: <span class=\"kbd\">Espacio</span> play/pause · <span class=\"kbd\">R</span> reset · <span class=\"kbd\">P</span> predator.",
+      titleFlocking: "Flocking (Boids)",
+      labelVision: "Radio de visión",
+      labelSeparation: "Separación",
+      labelAlignment: "Alineamiento",
+      labelCohesion: "Cohesión",
+      labelMaxSpeed: "Velocidad máx.",
+      labelMaxForce: "Fuerza máx.",
+      labelActiveRule: "Regla activa",
+      optRuleAll: "Todas las reglas",
+      optRuleSep: "Solo separación",
+      optRuleAli: "Solo alineamiento",
+      optRuleCoh: "Solo cohesión",
+      labelShowDebug: "Visualizar reglas",
+      labelBorders: "Bordes",
+      optWrap: "Wrap (toroide)",
+      optBounce: "Rebote",
+      labelPredator: "Predator",
+      labelPredFear: "Miedo a predator",
+      hintFlocking: "Idea didáctica: sube <b>separación</b> para “evitar choques”, sube <b>cohesión</b> para “herd/school”, y activa <b>predator</b> para ver “safety in numbers”.",
+      titleSync: "Sincronización (Kuramoto)",
+      labelK: "Acoplamiento (K)",
+      labelNoise: "Ruido",
+      labelSyncLocal: "Alcance vecinos",
+      hintSync: "K bajo: cada uno “a su ritmo”. K alto: tienden a sincronizar (destellos simultáneos).",
+      titleMetrics: "Métricas",
+      labelOrder: "Orden de flock (alineamiento global)",
+      labelSyncMetric: "Sincronía (|promedio de fases|)",
+      labelFps: "FPS",
+      btnExport: "Exportar CSV",
+      hintMetrics: "Orden ≈ 0: caos. Orden ≈ 1: velocidades alineadas. Sincronía ≈ 1: fases alineadas.",
+      titleQuestions: "🔬 Preguntas guía",
+      questionPrimary: "¿Qué pasa cuando subes la cohesión al máximo?",
+      questionHigh: "¿Por qué el “orden” aumenta cuando hay un depredador?",
+      questionPost: "¿A qué valor de K ocurre la transición de fase?",
+      hintMouse: "Tip: si quieres “migración”, mueve el mouse: el grupo tenderá a seguir un objetivo (modo flock/mixed).",
+      hudText: "<b>Mouse</b>: objetivo / “recurso” · <b>Click</b>: mover predator (si está ON) · <b>Modo sync</b>: destellos cuando la fase cruza 2π."
+    },
+    en: {
+      titleHeading: "Animal Groups Lab",
+      subtitleText: "Standalone simulator to model group behavior: <b>flocking (boids)</b> and <b>synchronization</b> (Strogatz/Kuramoto style: individuals that synchronize with neighbors).",
+      labelLanguage: "Language",
+      labelPreset: "Level",
+      labelMode: "Mode",
+      optModeFlock: "Flocking (birds / fish / herbivores)",
+      optModeSync: "Synchronization (fireflies / frogs / crickets)",
+      optModeMixed: "Mixed (flocking + sync tendency)",
+      btnPlayRunning: "Pause",
+      btnPlayPaused: "Play",
+      titlePopulation: "Population",
+      labelAgents: "N agents",
+      labelSeed: "Seed",
+      optSeedRandom: "Random",
+      optSeedFixed: "Fixed",
+      hintShortcuts: "Shortcuts: <span class=\"kbd\">Space</span> play/pause · <span class=\"kbd\">R</span> reset · <span class=\"kbd\">P</span> predator.",
+      titleFlocking: "Flocking (Boids)",
+      labelVision: "Vision radius",
+      labelSeparation: "Separation",
+      labelAlignment: "Alignment",
+      labelCohesion: "Cohesion",
+      labelMaxSpeed: "Max speed",
+      labelMaxForce: "Max force",
+      labelActiveRule: "Active rule",
+      optRuleAll: "All rules",
+      optRuleSep: "Separation only",
+      optRuleAli: "Alignment only",
+      optRuleCoh: "Cohesion only",
+      labelShowDebug: "Show rules",
+      labelBorders: "Borders",
+      optWrap: "Wrap (toroid)",
+      optBounce: "Bounce",
+      labelPredator: "Predator",
+      labelPredFear: "Fear of predator",
+      hintFlocking: "Teaching tip: raise <b>separation</b> to avoid collisions, raise <b>cohesion</b> to herd/school, and enable <b>predator</b> to see safety in numbers.",
+      titleSync: "Synchronization (Kuramoto)",
+      labelK: "Coupling (K)",
+      labelNoise: "Noise",
+      labelSyncLocal: "Neighbor span",
+      hintSync: "Low K: each agent keeps its own rhythm. High K: they tend to synchronize (simultaneous flashes).",
+      titleMetrics: "Metrics",
+      labelOrder: "Flock order (global alignment)",
+      labelSyncMetric: "Sync (|mean phase|)",
+      labelFps: "FPS",
+      btnExport: "Export CSV",
+      hintMetrics: "Order ≈ 0: chaos. Order ≈ 1: aligned velocities. Sync ≈ 1: aligned phases.",
+      titleQuestions: "🔬 Guiding questions",
+      questionPrimary: "What happens when cohesion is maximized?",
+      questionHigh: "Why does order increase when a predator is present?",
+      questionPost: "At what K value does the phase transition occur?",
+      hintMouse: "Tip: if you want " +
+        "migration", move the mouse: the group will follow a target (flock/mixed modes).",
+      hudText: "<b>Mouse</b>: target / resource · <b>Click</b>: move predator (if ON) · <b>Sync mode</b>: flashes when phase crosses 2π."
+    }
+  };
+
+  const PRESETS = {
+    primary: {
+      nAgents: 60,
+      vision: 60,
+      separation: 1.0,
+      alignment: 1.0,
+      cohesion: 1.0,
+      maxSpeed: 2.6,
+      maxForce: 0.08,
+      K: 1.4,
+      noise: 0.18,
+      syncLocal: 8,
+      showSync: false,
+      showMetrics: false,
+      showAdvanced: false,
+      showQuestions: ["primary"]
+    },
+    highschool: {
+      nAgents: 120,
+      vision: 70,
+      separation: 1.2,
+      alignment: 0.95,
+      cohesion: 0.8,
+      maxSpeed: 3.2,
+      maxForce: 0.1,
+      K: 2.2,
+      noise: 0.15,
+      syncLocal: 10,
+      showSync: true,
+      showMetrics: true,
+      showAdvanced: true,
+      showQuestions: ["primary", "highschool"]
+    },
+    postgrad: {
+      nAgents: 200,
+      vision: 70,
+      separation: 1.3,
+      alignment: 1.0,
+      cohesion: 0.85,
+      maxSpeed: 3.6,
+      maxForce: 0.12,
+      K: 2.6,
+      noise: 0.12,
+      syncLocal: 16,
+      showSync: true,
+      showMetrics: true,
+      showAdvanced: true,
+      showQuestions: ["primary", "highschool", "postgrad"]
+    }
+  };
+
+  // ---------- DOM ----------
+  const $ = (id)=>document.getElementById(id);
+  const canvas = $("c");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const languageEl = $("language");
+  const presetEl = $("preset");
+  const modeEl = $("mode");
+  const btnPlay = $("btnPlay");
+  const btnStep = $("btnStep");
+  const btnReset = $("btnReset");
+  const btnExport = $("btnExport");
+
+  const nAgentsEl = $("nAgents"); const nAgentsVal = $("nAgentsVal");
+  const seedEl = $("seed");
+
+  const visionEl = $("vision"); const visionVal = $("visionVal");
+  const separationEl = $("separation"); const separationVal = $("separationVal");
+  const alignmentEl = $("alignment"); const alignmentVal = $("alignmentVal");
+  const cohesionEl = $("cohesion"); const cohesionVal = $("cohesionVal");
+  const maxSpeedEl = $("maxSpeed"); const maxSpeedVal = $("maxSpeedVal");
+  const maxForceEl = $("maxForce"); const maxForceVal = $("maxForceVal");
+  const activeRuleEl = $("activeRule");
+  const showDebugEl = $("showDebug");
+  const wrapEl = $("wrap");
+
+  const predatorEl = $("predator");
+  const predFearEl = $("predFear"); const predFearVal = $("predFearVal");
+
+  const KEl = $("K"); const KVal = $("KVal");
+  const noiseEl = $("noise"); const noiseVal = $("noiseVal");
+  const syncLocalEl = $("syncLocal"); const syncLocalVal = $("syncLocalVal");
+
+  const mOrder = $("mOrder");
+  const mSync = $("mSync");
+  const mFps = $("mFps");
+
+  const groupSync = $("groupSync");
+  const groupMetrics = $("groupMetrics");
+  const groupQuestions = $("groupQuestions");
+  const questionEls = Array.from(groupQuestions.querySelectorAll(".question"));
+  const advancedRows = Array.from(document.querySelectorAll(".advanced"));
+
+  function bindSlider(slider, label, fmt=(v)=>v){
+    const upd = ()=>label.textContent = fmt(slider.value);
+    slider.addEventListener("input", upd);
+    upd();
+  }
+
+  bindSlider(nAgentsEl, nAgentsVal, v=>String(v));
+  bindSlider(visionEl, visionVal, v=>String(v));
+  bindSlider(separationEl, separationVal, v=>Number(v).toFixed(2));
+  bindSlider(alignmentEl, alignmentVal, v=>Number(v).toFixed(2));
+  bindSlider(cohesionEl, cohesionVal, v=>Number(v).toFixed(2));
+  bindSlider(maxSpeedEl, maxSpeedVal, v=>Number(v).toFixed(1));
+  bindSlider(maxForceEl, maxForceVal, v=>Number(v).toFixed(2));
+  bindSlider(predFearEl, predFearVal, v=>Number(v).toFixed(2));
+  bindSlider(KEl, KVal, v=>Number(v).toFixed(2));
+  bindSlider(noiseEl, noiseVal, v=>Number(v).toFixed(2));
+  bindSlider(syncLocalEl, syncLocalVal, v=>String(v));
+
+  function setLanguage(lang){
+    const dict = LANG[lang] || LANG.es;
+    const applyText = (id, html=false) => {
+      const el = $(id);
+      if (!el) return;
+      if (html) {
+        el.innerHTML = dict[id];
+      } else {
+        el.textContent = dict[id];
+      }
+    };
+
+    applyText("titleHeading");
+    applyText("subtitleText", true);
+    applyText("labelLanguage");
+    applyText("labelPreset");
+    applyText("labelMode");
+    applyText("optModeFlock");
+    applyText("optModeSync");
+    applyText("optModeMixed");
+    applyText("titlePopulation");
+    applyText("labelAgents");
+    applyText("labelSeed");
+    applyText("optSeedRandom");
+    applyText("optSeedFixed");
+    applyText("hintShortcuts", true);
+    applyText("titleFlocking");
+    applyText("labelVision");
+    applyText("labelSeparation");
+    applyText("labelAlignment");
+    applyText("labelCohesion");
+    applyText("labelMaxSpeed");
+    applyText("labelMaxForce");
+    applyText("labelActiveRule");
+    applyText("optRuleAll");
+    applyText("optRuleSep");
+    applyText("optRuleAli");
+    applyText("optRuleCoh");
+    applyText("labelShowDebug");
+    applyText("labelBorders");
+    applyText("optWrap");
+    applyText("optBounce");
+    applyText("labelPredator");
+    applyText("labelPredFear");
+    applyText("hintFlocking", true);
+    applyText("titleSync");
+    applyText("labelK");
+    applyText("labelNoise");
+    applyText("labelSyncLocal");
+    applyText("hintSync", true);
+    applyText("titleMetrics");
+    applyText("labelOrder");
+    applyText("labelSyncMetric");
+    applyText("labelFps");
+    applyText("btnExport");
+    applyText("hintMetrics", true);
+    applyText("titleQuestions");
+    applyText("questionPrimary");
+    applyText("questionHigh");
+    applyText("questionPost");
+    applyText("hintMouse");
+    applyText("hudText", true);
+
+    updatePlayButton();
+  }
+
+  function updatePlayButton(){
+    const lang = languageEl.value;
+    const dict = LANG[lang] || LANG.es;
+    btnPlay.textContent = running ? dict.btnPlayRunning : dict.btnPlayPaused;
+  }
+
+  function setRangeValue(el, value){
+    el.value = value;
+    el.dispatchEvent(new Event("input"));
+  }
+
+  function applyPreset(presetKey){
+    const preset = PRESETS[presetKey];
+    if (!preset) return;
+
+    setRangeValue(nAgentsEl, preset.nAgents);
+    setRangeValue(visionEl, preset.vision);
+    setRangeValue(separationEl, preset.separation);
+    setRangeValue(alignmentEl, preset.alignment);
+    setRangeValue(cohesionEl, preset.cohesion);
+    setRangeValue(maxSpeedEl, preset.maxSpeed);
+    setRangeValue(maxForceEl, preset.maxForce);
+    setRangeValue(KEl, preset.K);
+    setRangeValue(noiseEl, preset.noise);
+    setRangeValue(syncLocalEl, preset.syncLocal);
+
+    groupSync.classList.toggle("hidden", !preset.showSync);
+    groupMetrics.classList.toggle("hidden", !preset.showMetrics);
+    advancedRows.forEach((row)=>row.classList.toggle("hidden", !preset.showAdvanced));
+
+    questionEls.forEach((el)=>{
+      const level = el.getAttribute("data-level");
+      const show = preset.showQuestions.includes(level);
+      el.classList.toggle("hidden", !show);
+    });
+
+    resize();
+    reset();
+    draw();
+  }
+
+  // ---------- Simulation ----------
+  let W=0,H=0, DPR=1;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener("resize", resize);
+
+  let rng = Math.random;
+  let agents = [];
+  let running = true;
+  let mouse = {x:0,y:0, active:false};
+  let predator = {x:0,y:0, v:new V(), active:false};
+  let currentOrder = 0;
+  let currentSync = 0;
+  let simTime = 0;
+  let lastLog = 0;
+  const dataLog = [];
+
+  class Agent{
+    constructor(x,y){
+      this.p = new V(x,y);
+      const a = rng()*TAU;
+      this.v = new V(Math.cos(a), Math.sin(a)).mul(lerp(1.0, 2.5, rng()));
+      this.a = new V(0,0);
+
+      // Sync state (phase oscillator)
+      this.theta = rng()*TAU;
+      this.omega = lerp(1.2, 2.2, rng()); // natural angular speed
+      this.flash = 0; // visual flash impulse
+      this.debug = { sep: new V(), ali: new V(), coh: new V() };
+    }
+  }
+
+  function reset(){
+    const N = Number(nAgentsEl.value);
+    const fixedSeed = seedEl.value === "fixed";
+    rng = fixedSeed ? mulberry32(1337) : Math.random;
+
+    agents = [];
+    for(let i=0;i<N;i++){
+      agents.push(new Agent(rng()*W, rng()*H));
+    }
+    predator.x = W*0.5; predator.y = H*0.5; predator.v = new V(0,0);
+    predator.active = predatorEl.checked;
+
+    // sync phases for "sync mode": place them roughly on a ring for clarity
+    if(modeEl.value === "sync"){
+      const cx=W*0.5, cy=H*0.5, R=Math.min(W,H)*0.33;
+      for(let i=0;i<N;i++){
+        const t = i/N * TAU;
+        agents[i].p.x = cx + Math.cos(t)*R + (rng()-0.5)*8;
+        agents[i].p.y = cy + Math.sin(t)*R + (rng()-0.5)*8;
+        agents[i].v.x = 0; agents[i].v.y = 0;
+      }
+    }
+
+    simTime = 0;
+    lastLog = 0;
+    dataLog.length = 0;
+  }
+
+  function logMetrics(){
+    if (simTime - lastLog < 0.25) return;
+    lastLog = simTime;
+    dataLog.push({
+      t: simTime.toFixed(2),
+      order: currentOrder.toFixed(3),
+      sync: modeEl.value === "flock" ? "" : currentSync.toFixed(3),
+      n: agents.length
+    });
+  }
+
+  // Flocking behaviors
+  function boidsStep(dt){
+    const vision = Number(visionEl.value);
+    const vision2 = vision*vision;
+    const maxSpeed = Number(maxSpeedEl.value);
+    const maxForce = Number(maxForceEl.value);
+    const wrapMode = wrapEl.value;
+    const fear = Number(predFearEl.value);
+    const predOn = predator.active;
+    const activeRule = activeRuleEl.value;
+
+    let wSep = Number(separationEl.value);
+    let wAli = Number(alignmentEl.value);
+    let wCoh = Number(cohesionEl.value);
+
+    if(activeRule !== "all"){
+      wSep = activeRule === "separation" ? wSep : 0;
+      wAli = activeRule === "alignment" ? wAli : 0;
+      wCoh = activeRule === "cohesion" ? wCoh : 0;
+    }
+
+    // Optional "goal" (mouse): gently pull the flock
+    const goalOn = mouse.active;
+
+    // Metrics: alignment order parameter
+    let sumDir = new V(0,0);
+
+    for(let i=0;i<agents.length;i++){
+      const me = agents[i];
+      let count = 0;
+
+      const sep = new V(0,0);
+      const ali = new V(0,0);
+      const coh = new V(0,0);
+
+      for(let j=0;j<agents.length;j++){
+        if(i===j) continue;
+        const other = agents[j];
+
+        // distance with wrap-aware shortest vector (for nicer wrap dynamics)
+        let dx = other.p.x - me.p.x;
+        let dy = other.p.y - me.p.y;
+        if(wrapMode==="wrap"){
+          if(dx > W/2) dx -= W; else if(dx < -W/2) dx += W;
+          if(dy > H/2) dy -= H; else if(dy < -H/2) dy += H;
+        }
+        const d2 = dx*dx + dy*dy;
+        if(d2 < vision2){
+          count++;
+          // separation: inverse-square push
+          if(d2 > 1e-6){
+            sep.add(new V(-dx, -dy).mul(1/(d2)));
+          }
+          ali.add(other.v);
+          coh.add(new V(dx,dy)); // vector to neighbor (for centroid)
+        }
+      }
+
+      if(count > 0){
+        // Alignment: match average velocity
+        const aliSteer = ali.div(count).setMag(maxSpeed).sub(me.v).limit(maxForce);
+
+        // Cohesion: steer toward neighbors' centroid
+        const toCenter = coh.div(count); // average vector to neighbors
+        const cohSteer = toCenter.setMag(maxSpeed).sub(me.v).limit(maxForce);
+
+        // Separation: strong short-range repulsion
+        const sepSteer = sep.setMag(maxSpeed).sub(me.v).limit(maxForce);
+
+        me.debug.sep = sepSteer.copy();
+        me.debug.ali = aliSteer.copy();
+        me.debug.coh = cohSteer.copy();
+
+        me.a
+          .add(sepSteer.mul(wSep))
+          .add(aliSteer.mul(wAli))
+          .add(cohSteer.mul(wCoh));
+      } else {
+        me.debug.sep = new V();
+        me.debug.ali = new V();
+        me.debug.coh = new V();
+      }
+
+      // Predator avoidance
+      if(predOn){
+        let dx = me.p.x - predator.x;
+        let dy = me.p.y - predator.y;
+        // wrap-aware
+        if(wrapMode==="wrap"){
+          if(dx > W/2) dx -= W; else if(dx < -W/2) dx += W;
+          if(dy > H/2) dy -= H; else if(dy < -H/2) dy += H;
+        }
+        const d = Math.hypot(dx,dy);
+        const panicRadius = vision*1.4;
+        if(d < panicRadius && d > 1e-6){
+          const push = new V(dx,dy).setMag(maxSpeed)
+            .sub(me.v).limit(maxForce);
+          // stronger as closer
+          const k = (1 - d/panicRadius);
+          me.a.add(push.mul(fear * k));
+        }
+      }
+
+      // Goal attraction (weak; useful for "migration to resource")
+      if(goalOn){
+        const d = Math.hypot(mouse.x - me.p.x, mouse.y - me.p.y);
+        if(d > 1e-6){
+          const pull = new V(mouse.x - me.p.x, mouse.y - me.p.y)
+            .setMag(maxSpeed).sub(me.v).limit(maxForce);
+          me.a.add(pull.mul(0.08));
+        }
+      }
+
+      // integrate
+      me.v.add(me.a.mul(dt)).limit(maxSpeed);
+      me.p.add(me.v.copy().mul(dt));
+      me.a.mul(0);
+
+      // borders
+      if(wrapMode==="wrap"){
+        if(me.p.x < 0) me.p.x += W;
+        if(me.p.x >= W) me.p.x -= W;
+        if(me.p.y < 0) me.p.y += H;
+        if(me.p.y >= H) me.p.y -= H;
+      } else {
+        if(me.p.x < 0){me.p.x=0; me.v.x*=-1;}
+        if(me.p.x > W){me.p.x=W; me.v.x*=-1;}
+        if(me.p.y < 0){me.p.y=0; me.v.y*=-1;}
+        if(me.p.y > H){me.p.y=H; me.v.y*=-1;}
+      }
+
+      // metric
+      if(me.v.mag() > 1e-6){
+        sumDir.add(me.v.copy().norm());
+      }
+    }
+
+    currentOrder = sumDir.mag() / agents.length;
+    mOrder.textContent = currentOrder.toFixed(3);
+
+    // predator movement (simple chase to center or mouse)
+    if(predOn){
+      const target = mouse.active ? new V(mouse.x, mouse.y) : new V(W*0.5, H*0.5);
+      const to = V.sub(target, new V(predator.x, predator.y));
+      const sp = 2.6;
+      predator.v = to.setMag(sp);
+      predator.x += predator.v.x * dt;
+      predator.y += predator.v.y * dt;
+
+      if(wrapEl.value==="wrap"){
+        if(predator.x < 0) predator.x += W;
+        if(predator.x >= W) predator.x -= W;
+        if(predator.y < 0) predator.y += H;
+        if(predator.y >= H) predator.y -= H;
+      } else {
+        predator.x = clamp(predator.x, 0, W);
+        predator.y = clamp(predator.y, 0, H);
+      }
+    }
+  }
+
+  // Kuramoto synchronization step
+  function syncStep(dt, useSpatial=false){
+    const K = Number(KEl.value);
+    const noise = Number(noiseEl.value);
+    const local = Number(syncLocalEl.value);
+    const wrapMode = wrapEl.value;
+    const vision = Number(visionEl.value);
+    const vision2 = vision*vision;
+
+    // order parameter r e^{i psi} = (1/N) Σ e^{i theta}
+    let cx=0, sx=0;
+
+    const N = agents.length;
+    for(let i=0;i<N;i++){
+      const me = agents[i];
+      let coupling = 0;
+
+      if(useSpatial){
+        let count = 0;
+        for(let j=0;j<N;j++){
+          if(i===j) continue;
+          let dx = agents[j].p.x - me.p.x;
+          let dy = agents[j].p.y - me.p.y;
+          if(wrapMode==="wrap"){
+            if(dx > W/2) dx -= W; else if(dx < -W/2) dx += W;
+            if(dy > H/2) dy -= H; else if(dy < -H/2) dy += H;
+          }
+          const d2 = dx*dx + dy*dy;
+          if(d2 < vision2){
+            count++;
+            coupling += Math.sin(agents[j].theta - me.theta);
+          }
+        }
+        coupling = count > 0 ? coupling / count : 0;
+      } else {
+        for(let k=1;k<=local;k++){
+          const j1 = (i+k) % N;
+          const j2 = (i-k+N) % N;
+          coupling += Math.sin(agents[j1].theta - me.theta);
+          coupling += Math.sin(agents[j2].theta - me.theta);
+        }
+        coupling /= (2*local);
+      }
+
+      // dtheta = omega + K * coupling + noise
+      const dtheta = me.omega + K * coupling + (rng()*2-1)*noise;
+      const prev = me.theta;
+      me.theta = (me.theta + dtheta * dt) % TAU;
+
+      // flash when passing through 0 (i.e., completing a cycle)
+      if(prev > me.theta){ // wrapped around
+        me.flash = 1.0;
+      } else {
+        me.flash *= Math.exp(-3.2*dt); // decay
+      }
+
+      cx += Math.cos(me.theta);
+      sx += Math.sin(me.theta);
+    }
+
+    currentSync = Math.hypot(cx, sx) / N;
+    mSync.textContent = currentSync.toFixed(3);
+
+    // In pure sync mode, keep agents on a soft ring (looks like "pulsing circle")
+    if(modeEl.value==="sync"){
+      const cx0=W*0.5, cy0=H*0.5, R=Math.min(W,H)*0.33;
+      for(let i=0;i<N;i++){
+        const t = i/N * TAU;
+        agents[i].p.x = cx0 + Math.cos(t)*R;
+        agents[i].p.y = cy0 + Math.sin(t)*R;
+      }
+    }
+  }
+
+  function mixedStep(dt){
+    // Run flocking + mild phase coupling; flashes correlate with local density
+    boidsStep(dt);
+
+    // Make omega depend a bit on local neighborhood -> emergent sync in clusters
+    const vision = Number(visionEl.value);
+    const vision2 = vision*vision;
+    const N = agents.length;
+    for(let i=0;i<N;i++){
+      const me = agents[i];
+      let count = 0;
+      for(let j=0;j<N;j++){
+        if(i===j) continue;
+        const dx = agents[j].p.x - me.p.x;
+        const dy = agents[j].p.y - me.p.y;
+        const d2 = dx*dx+dy*dy;
+        if(d2 < vision2) count++;
+      }
+      // more neighbors => slightly higher coupling strength
+      me.omega = 1.4 + clamp(count/30, 0, 1)*0.8;
+    }
+    syncStep(dt, true);
+  }
+
+  // ---------- Render ----------
+  function drawDebug(a){
+    const vision = Number(visionEl.value);
+    ctx.beginPath();
+    ctx.arc(a.p.x, a.p.y, vision, 0, TAU);
+    ctx.strokeStyle = "rgba(134,183,255,0.15)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const drawVec = (vec, color) => {
+      const scale = 20;
+      ctx.beginPath();
+      ctx.moveTo(a.p.x, a.p.y);
+      ctx.lineTo(a.p.x + vec.x * scale, a.p.y + vec.y * scale);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    };
+
+    drawVec(a.debug.sep, "rgba(255,124,138,0.7)");
+    drawVec(a.debug.ali, "rgba(124,255,178,0.7)");
+    drawVec(a.debug.coh, "rgba(134,183,255,0.7)");
+  }
+
+  function draw(){
+    // background
+    ctx.fillStyle = "#0b1020";
+    ctx.fillRect(0,0,W,H);
+
+    const mode = modeEl.value;
+
+    // soft "goal" marker
+    if(mouse.active && (mode==="flock" || mode==="mixed")){
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 7, 0, TAU);
+      ctx.fillStyle = "rgba(134,183,255,.85)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 22, 0, TAU);
+      ctx.strokeStyle = "rgba(134,183,255,.25)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // predator
+    if(predator.active && (mode==="flock" || mode==="mixed")){
+      ctx.beginPath();
+      ctx.arc(predator.x, predator.y, 10, 0, TAU);
+      ctx.fillStyle = "rgba(255,124,138,.85)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(predator.x, predator.y, 40, 0, TAU);
+      ctx.strokeStyle = "rgba(255,124,138,.20)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // agents
+    const maxSpeed = Number(maxSpeedEl.value);
+
+    for(const a of agents){
+      const speed = a.v.mag();
+      const s = clamp(speed / (maxSpeed||1), 0, 1);
+
+      // base color by mode
+      let r=134,g=183,b=255, alpha=0.92;
+      if(mode==="sync"){
+        // phase-based color + flash
+        const t = a.theta / TAU;
+        // simple phase palette: blue->green->yellow->pink
+        const p = t < 0.5 ? t*2 : (t-0.5)*2;
+        if(t < 0.5){
+          r = Math.round(lerp(120, 140, p));
+          g = Math.round(lerp(160, 255, p));
+          b = Math.round(lerp(255, 170, p));
+        } else {
+          r = Math.round(lerp(255, 255, p));
+          g = Math.round(lerp(210, 140, p));
+          b = Math.round(lerp(160, 255, p));
+        }
+        alpha = 0.80 + a.flash*0.35;
+      } else {
+        // flock speed tint (faster slightly brighter)
+        r = Math.round(lerp(120, 180, s));
+        g = Math.round(lerp(170, 220, s));
+        b = Math.round(lerp(255, 255, s));
+        alpha = 0.92;
+      }
+
+      // draw as small triangle (direction) or circle (sync mode)
+      if(mode==="sync"){
+        const rad = 3.0 + a.flash*5.0;
+        ctx.beginPath();
+        ctx.arc(a.p.x, a.p.y, rad, 0, TAU);
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.fill();
+      } else {
+        const ang = Math.atan2(a.v.y, a.v.x);
+        const size = 6.2;
+        ctx.save();
+        ctx.translate(a.p.x, a.p.y);
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.moveTo(size, 0);
+        ctx.lineTo(-size*0.7, size*0.45);
+        ctx.lineTo(-size*0.7, -size*0.45);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if(showDebugEl.checked && mode !== "sync"){
+        drawDebug(a);
+      }
+    }
+
+    // metrics when not updated
+    if(mode!=="sync"){
+      // sync metric still meaningful in mixed, but in pure flock show placeholder if not computed
+      if(mode==="flock") mSync.textContent = "—";
+    }
+  }
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  let fpsSMA = 60;
+  const FIXED_DT = 1/60;
+  let accumulator = 0;
+
+  function simulate(dt){
+    simTime += dt;
+
+    // ensure predator state
+    predator.active = predatorEl.checked;
+
+    const mode = modeEl.value;
+    if(mode === "flock") boidsStep(dt);
+    else if(mode === "sync") syncStep(dt);
+    else mixedStep(dt);
+
+    logMetrics();
+  }
+
+  function loop(){
+    const now = performance.now();
+    let frameDt = (now - last) / 1000;
+    last = now;
+    frameDt = clamp(frameDt, 0, 0.05);
+    accumulator += frameDt;
+
+    const fps = 1/Math.max(frameDt,1e-6);
+    fpsSMA = fpsSMA*0.92 + fps*0.08;
+    mFps.textContent = fpsSMA.toFixed(0);
+
+    while(accumulator >= FIXED_DT){
+      if(running){
+        simulate(FIXED_DT);
+      }
+      accumulator -= FIXED_DT;
+    }
+
+    if(running){
+      draw();
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Interaction ----------
+  function canvasPos(evt){
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (evt.clientX - rect.left),
+      y: (evt.clientY - rect.top)
+    };
+  }
+
+  canvas.addEventListener("mousemove", (e)=>{
+    const p = canvasPos(e);
+    mouse.x = p.x; mouse.y = p.y; mouse.active = true;
+  });
+  canvas.addEventListener("mouseleave", ()=>{
+    mouse.active = false;
+  });
+  canvas.addEventListener("mousedown", (e)=>{
+    const p = canvasPos(e);
+    // click moves predator if ON
+    if(predatorEl.checked){
+      predator.x = p.x; predator.y = p.y;
+    }
+  });
+
+  btnPlay.addEventListener("click", ()=>{
+    running = !running;
+    updatePlayButton();
+  });
+
+  btnStep.addEventListener("click", ()=>{
+    if(running) return;
+    simulate(FIXED_DT);
+    draw();
+  });
+
+  btnReset.addEventListener("click", ()=>{
+    resize();
+    reset();
+    draw();
+  });
+
+  btnExport.addEventListener("click", ()=>{
+    const rows = [["time","order","sync","n_agents"]];
+    dataLog.forEach((d)=>rows.push([d.t, d.order, d.sync, d.n]));
+    const csv = rows.map((r)=>r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "flocking_metrics.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  // Rebuild population when N changes (on release for performance)
+  nAgentsEl.addEventListener("change", ()=>{
+    presetEl.value = "custom";
+    resize(); reset(); draw();
+  });
+
+  // Reset on key toggles likely to affect layout
+  modeEl.addEventListener("change", ()=>{
+    presetEl.value = "custom";
+    resize(); reset(); draw();
+  });
+  seedEl.addEventListener("change", ()=>{
+    resize(); reset(); draw();
+  });
+
+  activeRuleEl.addEventListener("change", ()=>{
+    draw();
+  });
+
+  predatorEl.addEventListener("change", ()=>{
+    predator.active = predatorEl.checked;
+  });
+
+  showDebugEl.addEventListener("change", ()=>{
+    draw();
+  });
+
+  languageEl.addEventListener("change", ()=>{
+    setLanguage(languageEl.value);
+  });
+
+  presetEl.addEventListener("change", ()=>{
+    const value = presetEl.value;
+    if (value !== "custom") {
+      applyPreset(value);
+    }
+  });
+
+  // Keyboard shortcuts
+  window.addEventListener("keydown", (e)=>{
+    if(e.code==="Space"){
+      e.preventDefault();
+      btnPlay.click();
+    } else if(e.key==="r" || e.key==="R"){
+      btnReset.click();
+    } else if(e.key==="p" || e.key==="P"){
+      predatorEl.checked = !predatorEl.checked;
+      predator.active = predatorEl.checked;
+    }
+  });
+
+  // ---------- Boot ----------
+  resize();
+  setLanguage(languageEl.value);
+  applyPreset(presetEl.value);
+  reset();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
