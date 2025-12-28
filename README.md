@@ -5,7 +5,6 @@ Repositorio para alojar simulaciones standalone (HTML/JS/CSS) en GitHub Pages.
 ## Simulaciones disponibles
 
 - Animal Groups Lab v2.1: `animal_groups_lab_v2_1.html`
-- Simulador de Clase: `sim.html`
 - Flocking + Sync: `sims/flocking/`
 
 ## Ejecutar localmente
@@ -18,7 +17,6 @@ Luego abre:
 
 - http://localhost:8000/
 - http://localhost:8000/animal_groups_lab_v2_1.html
-- http://localhost:8000/sim.html
 - http://localhost:8000/sims/flocking/
 
 ## Configurar GitHub Pages
